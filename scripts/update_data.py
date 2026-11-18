@@ -133,13 +133,15 @@ def fetch_headshot_candidates():
     with urllib.request.urlopen(req, timeout=180) as resp:
         players = json.load(resp)
     cand = defaultdict(list)
+    by_id = {}
     for pid, p in players.items():
+        by_id[pid] = p
         pos = p.get("position")
         fn = p.get("full_name") or ""
         if not pos or not fn:
             continue
         cand[(norm_name(fn), pos)].append((pid, p))
-    return cand
+    return cand, by_id
 
 
 def resolve_headshot(cand, key):
@@ -303,12 +305,16 @@ def main():
             row["act"] = row.pop("_act")
 
     # --- Headshots ------------------------------------------------------------
-    cand = fetch_headshot_candidates()
+    cand, sleeper_by_id = fetch_headshot_candidates()
     headshots = {}
+    ages = {}
     for row in out_rows:
         hid = resolve_headshot(cand, (norm_name(row["name"]), row["pos"]))
         if hid:
             headshots[row["player"]] = str(hid)
+            a = (sleeper_by_id.get(hid) or {}).get("age")
+            if isinstance(a, (int, float)):
+                ages[row["player"]] = int(a)
     if len(headshots) < MIN_HEADSHOT_RATIO * len({r["player"] for r in out_rows}):
         sys.exit(
             "Only %d headshots matched; refusing." % len(headshots)
@@ -336,6 +342,8 @@ def main():
         + json.dumps(config, separators=(",", ":"))
         + ";\nwindow.CPLANT_HEADSHOTS="
         + json.dumps(headshots, separators=(",", ":"), sort_keys=True)
+        + ";\nwindow.CPLANT_AGES="
+        + json.dumps(ages, separators=(",", ":"), sort_keys=True)
         + ";\n"
     ]
     n = len(out_rows)
