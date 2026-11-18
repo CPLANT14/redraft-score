@@ -55,7 +55,7 @@ const HEADSHOTS=window.CPLANT_HEADSHOTS;
 const DATA=[...window.CPLANT_DATA,...window.CPLANT_DATA2,...window.CPLANT_DATA3];for(const r of DATA)r.headshotId=HEADSHOTS[r.player];
 const SEASONS=[...new Set(DATA.map(r=>r.season))].sort((a,b)=>b-a);
 for(const el of document.querySelectorAll('.last-updated'))el.textContent=CONFIG.updated;for(const el of document.querySelectorAll('.row-count'))el.textContent=Number(CONFIG.rows).toLocaleString('en-US');
-document.title='CPLANT | '+CONFIG.scoreName;document.getElementById('score-title').textContent=CONFIG.scoreName;document.getElementById('score-column-title').textContent=CONFIG.scoreName;document.querySelector('#sort option[value=model]').textContent=CONFIG.scoreName;
+document.title='CPLANT | '+CONFIG.scoreName;document.getElementById('score-title').textContent=CONFIG.scoreName;document.getElementById('score-column-title').textContent=CONFIG.scoreName;
 const headshot=r=>`<span class="portrait"><span aria-hidden="true">${esc(r.name.split(' ').map(n=>n[0]).slice(0,2).join(''))}</span>${r.headshotId?`<img src="https://sleepercdn.com/content/nfl/players/${r.headshotId}.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">`:''}</span>`;
 const KEYS=['pre','weekly','salary','prop'],LABELS=['Preseason','Weekly proj.','DFS salary','Prop line'],DKEYS=['actual','pre','salary','weekly','prop'],DLABELS=['Actual PPG','Preseason','DFS salary','Weekly proj.','Prop line'],ACTMIN=4;
 const state={pos:'QB',season:SEASONS[0]||2026,search:'',sort:'model',dir:'desc',limit:100,selected:null};
