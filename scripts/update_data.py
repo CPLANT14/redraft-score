@@ -24,9 +24,11 @@ Env:
               without writing files.
 """
 
+import csv
 import datetime
 import json
 import os
+import math
 import re
 import sys
 import urllib.parse
@@ -39,10 +41,12 @@ MIN_HEADSHOT_RATIO = 0.9
 # The sheet's model score must equal this mix of its component Zs for every row.
 WEIGHT_TOL = 1e-6
 
-# XO data tab: A=pid, M=dfs_salary_0, AM=year, AN=week, AP=implied_prop_pts,
-# AQ=main_slate, AR=week_completed. (Later columns are a separate game-info
-# join and are not used.)
-XO_TQ = "select A,M,AM,AN,AP,AQ,AR"
+# XO data tab block 1: A=pid, B=first, C=last, D=pos group,
+# K=season_projected_points_0, L=week_projected_points_0, M=dfs_salary_0,
+# AL=fantasy_points_from_plays_0, AM=year, AN=week, AO=pos group,
+# AP=implied_prop_pts, AQ=main_slate, AR=week_completed. (Columns AT+ are a
+# separate game-info join and are not used.)
+XO_TQ = "select A,B,C,D,K,L,M,AL,AM,AN,AO,AP,AQ,AR"
 
 UA = {"User-Agent": "redraft-score-updater (GitHub Actions)"}
 
@@ -207,7 +211,7 @@ def main():
         sys.exit("Z-scores header changed; refusing to rebuild. Got: %r" % (header[:4],))
 
     out_rows = []
-    for r in [x[:12] for x in zs]:
+    for r in [x[:14] for x in zs]:
         pid = str(r[0]).strip() if r[0] else ""
         year = int_or_none(r[4])
         if not pid or year is None:
@@ -218,6 +222,7 @@ def main():
         pre, weekly = num(r[6]), num(r[7])
         zact, zsalary, zprop = num(r[8]), num(r[9]), num(r[10])
         sheet_model = num(r[11])
+        tgt_ppg, tgt_pre = num(r[12]), num(r[13])
         if sheet_model is not None and None not in (pre, weekly, zact, zsalary, zprop):
             mixed = 0.25 * pre + 0.05 * weekly + 0.5 * zact + 0.15 * zsalary + 0.05 * zprop
             if abs(mixed - sheet_model) > WEIGHT_TOL:
@@ -235,6 +240,8 @@ def main():
             "weekly": r4(weekly),
             "salary": r4(zsalary),
             "prop": r4(zprop),
+            "tgtPPG": r4(tgt_ppg),
+            "tgtPre": r4(tgt_pre),
             "weeks": base["weeks"],
         }
         if base["act"] is not None:
@@ -249,17 +256,26 @@ def main():
     sal_weeks = defaultdict(set)
     prop_weeks = defaultdict(set)
     completed_max = defaultdict(int)
+    weekly_rows = []
     for r in xo:
         pid = str(r[0]).strip() if r[0] else ""
         if not pid:
             continue
-        has_salary = num(r[1]) is not None
-        y, w = int_or_none(r[2]), int_or_none(r[3])
-        prop_pts = num(r[4])
-        main = int_or_none(r[5])
-        comp = int_or_none(r[6])
+        name = ("%s %s" % (str(r[1] or "").strip(), str(r[2] or "").strip())).strip()
+        pos = str(r[10] or r[3] or "").strip()
+        season_proj, week_proj = num(r[4]), num(r[5])
+        has_salary = num(r[6]) is not None
+        pts = num(r[7])
+        y, w = int_or_none(r[8]), int_or_none(r[9])
+        prop_pts = num(r[11])
+        main = int_or_none(r[12])
+        comp = int_or_none(r[13])
         if y is None or w is None:
             continue
+        weekly_rows.append([
+            pid, name, pos, y, w, r4(pts), r4(week_proj), r4(season_proj),
+            num(r[6]), r4(prop_pts), main, comp,
+        ])
         if prop_pts is not None and comp == 1:
             prop_weeks[(pid, y)].add(w)
         if has_salary and main == 1 and comp == 1:
@@ -339,6 +355,88 @@ def main():
             f.write(content)
     with open("0-model-config.js", "w", encoding="utf-8") as f:
         f.write(parts[0])
+
+    # --- CSV exports ---------------------------------------------------------
+    # Actual-PPG Zs are computed exactly as the site's runtime does: cohort is
+    # players with >=4 games in the same position and season, PPG = act/weeks,
+    # population standard deviation.
+    ACTMIN = 4
+    cohort = defaultdict(list)
+    for row in out_rows:
+        act, weeks = row.get("act"), row.get("weeks")
+        if act is not None and weeks is not None and weeks >= ACTMIN:
+            cohort[(row["pos"], row["season"])].append(act / weeks)
+    cohort_stats = {}
+    for k, xs in cohort.items():
+        m = sum(xs) / len(xs)
+        sd = math.sqrt(sum((x - m) ** 2 for x in xs) / len(xs)) or 1.0
+        cohort_stats[k] = (m, sd)
+    runtime_zact = {}
+    for row in out_rows:
+        act, weeks = row.get("act"), row.get("weeks")
+        st = cohort_stats.get((row["pos"], row["season"]))
+        if st and act is not None and weeks is not None and weeks >= ACTMIN:
+            runtime_zact[row["id"]] = (act / weeks - st[0]) / st[1]
+
+    def phi(z):
+        return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+    def model_of(row):
+        # Site semantics: actual PPG counts from 4 games; missing components
+        # are dropped and the remaining weights rescale (nothing zero-filled).
+        comps = []
+        if row.get("pre") is not None:
+            comps.append((0.25, row["pre"]))
+        if row.get("weekly") is not None:
+            comps.append((0.05, row["weekly"]))
+        zact = runtime_zact.get(row["id"])
+        if zact is not None:
+            comps.append((0.5, zact))
+        if row.get("salary") is not None:
+            comps.append((0.15, row["salary"]))
+        if row.get("prop") is not None:
+            comps.append((0.05, row["prop"]))
+        tw = sum(w for w, _ in comps)
+        if tw == 0:
+            return None
+        return sum(w * v for w, v in comps) / tw
+
+    with open("data.csv", "w", encoding="utf-8", newline="") as f:
+        wcsv = csv.writer(f)
+        wcsv.writerow([
+            "id", "player_id", "name", "pos", "season", "model_z", "score_0_100",
+            "z_preseason", "z_weekly_proj", "z_actual_ppg", "z_salary", "z_prop",
+            "actual_pts", "actual_ppg", "games_played", "salary_weeks",
+            "prop_weeks", "scope", "target_n1_actual_ppg",
+            "target_n1_preseason_pts", "headshot_url",
+        ])
+        for row in out_rows:
+            mz = model_of(row)
+            act = row.get("act")
+            weeks = row.get("weeks")
+            ppg = round(act / weeks, 3) if act is not None and weeks else None
+            hid = headshots.get(row["player"])
+            wcsv.writerow([
+                row["id"], row["player"], row["name"], row["pos"], row["season"],
+                None if mz is None else round(mz, 4),
+                None if mz is None else round(100 * phi(mz), 1),
+                row.get("pre"), row.get("weekly"),
+                None if runtime_zact.get(row["id"]) is None else round(runtime_zact[row["id"]], 4),
+                row.get("salary"), row.get("prop"), act, ppg, weeks,
+                row.get("salaryWeeks"), row.get("propWeeks"), row.get("scope"),
+                row.get("tgtPPG"), row.get("tgtPre"),
+                ("https://sleepercdn.com/content/nfl/players/%s.jpg" % hid) if hid else None,
+            ])
+
+    with open("weekly.csv", "w", encoding="utf-8", newline="") as f:
+        wcsv = csv.writer(f)
+        wcsv.writerow([
+            "player_id", "name", "pos", "season", "week", "fantasy_points",
+            "weekly_projection", "season_projection", "dfs_salary",
+            "implied_prop_pts", "main_slate", "week_completed",
+        ])
+        for wr in weekly_rows:
+            wcsv.writerow(wr)
 
     # Bump the asset version so returning phones pick up the new files.
     version = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M")
