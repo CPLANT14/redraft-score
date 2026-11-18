@@ -46,7 +46,7 @@ WEIGHT_TOL = 1e-6
 # AL=fantasy_points_from_plays_0, AM=year, AN=week, AO=pos group,
 # AP=implied_prop_pts, AQ=main_slate, AR=week_completed. (Columns AT+ are a
 # separate game-info join and are not used.)
-XO_TQ = "select A,B,C,D,K,L,M,AL,AM,AN,AO,AP,AQ,AR"
+XO_TQ = "select A,B,C,D,K,L,M,AL,AM,AN,AO,AP,AQ,AR,N"
 
 UA = {"User-Agent": "redraft-score-updater (GitHub Actions)"}
 
@@ -274,9 +274,14 @@ def main():
         comp = int_or_none(r[13])
         if y is None or w is None:
             continue
+        fd_sal = num(r[14])
+        dk_sal = num(r[6])
+        cap_pct = None
+        if dk_sal is not None and fd_sal is not None:
+            cap_pct = round(((dk_sal / 50000.0) + (fd_sal / 60000.0)) / 2.0 * 100.0, 2)
         weekly_rows.append([
             pid, name, pos, y, w, r4(pts), r4(week_proj), r4(season_proj),
-            num(r[6]), r4(prop_pts), main, comp,
+            dk_sal, r4(prop_pts), main, comp, fd_sal, cap_pct,
         ])
         if prop_pts is not None and comp == 1:
             prop_weeks[(pid, y)].add(w)
@@ -442,6 +447,7 @@ def main():
             "player_id", "name", "pos", "season", "week", "fantasy_points",
             "weekly_projection", "season_projection", "dfs_salary",
             "implied_prop_pts", "main_slate", "week_completed",
+            "dfs_salary_2", "salary_cap_pct",
         ])
         for wr in weekly_rows:
             wcsv.writerow(wr)
