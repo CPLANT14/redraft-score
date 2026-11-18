@@ -33,10 +33,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet 0-model-config.js 2-model-data.js 3-model-data.js 4-model-data.js index.html; then
+          if git diff --quiet 0-model-config.js 2-model-data.js 3-model-data.js 4-model-data.js data.csv weekly.csv index.html; then
             echo "No data change; nothing to commit."
           else
-            git add 0-model-config.js 2-model-data.js 3-model-data.js 4-model-data.js index.html
+            git add 0-model-config.js 2-model-data.js 3-model-data.js 4-model-data.js data.csv weekly.csv index.html
             git commit -m "Auto-update model data ($(date -u +'%Y-%m-%d %H:%M UTC'))"
             git push
           fi
