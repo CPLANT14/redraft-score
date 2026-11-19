@@ -152,11 +152,23 @@ addEventListener('scroll',()=>hideTip(),{capture:true,passive:true});const _thea
 $('main').addEventListener('click',e=>{const th=e.target.closest('[data-tip]');if(!th){hideTip();return}if(matchMedia('(hover:none)').matches){const isSort=!!e.target.closest('[data-sort]');if(th.hasAttribute('data-tip-open')){hideTip()}else{showTip(th)}if(!isSort){e.preventDefault();e.stopPropagation()}}},true);
 $('#reset').addEventListener('click',()=>{state.search='';$('#search').value='';render()});$('#rows').addEventListener('change',()=>{state.limit=rowsVal();render()});const rowsVal=()=>{const v=document.getElementById('rows').value;return v==='all'?1e9:+v};function copyText(t,btn){const done=()=>{if(!btn)return;const o=btn.textContent;btn.textContent='Copied';setTimeout(()=>{btn.textContent=o},1500)};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done,done)}else{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy')}catch(_){}ta.remove();done()}}
 
+const WKCOLS=[['name','Player'],['pos','Position'],['season','Season'],['week','Week'],['pts','Fantasy points'],['proj','Weekly proj.'],['sproj','Season proj.'],['sal','DFS salary'],['prop','Prop line'],['cap','Salary cap %'],['slate','Main slate'],['done','Week completed']];
+const WKHEAD={name:'name',pos:'pos',season:'season',week:'week',pts:'fantasy_points',proj:'weekly_projection',sproj:'season_projection',sal:'dfs_salary',prop:'implied_prop_pts',cap:'salary_cap_pct',slate:'main_slate',done:'week_completed'};
+let WK=null,_wkRowsP=null;
+function fetchWeeklyRows(){if(!_wkRowsP){_wkRowsP=fetch('weekly.csv').then(r=>{if(!r.ok)throw new Error('http');return r.text()}).then(t=>{const out=[];const ls=t.split(/\r?\n/);for(let i=1;i<ls.length;i++){const ln=ls[i];if(!ln)continue;const c=parseCsvLine(ln);if(c.length<12)continue;out.push({id:c[0],name:c[1],pos:c[2],season:c[3],week:+c[4],pts:c[5],proj:c[6],sproj:c[7],sal:c[8],prop:c[9],slate:c[10],done:c[11],cap:c[13]===undefined?'':c[13]})}return out}).catch(()=>[])}return _wkRowsP}
+function wkFilter(o){let rows=WK||[];
+if(o.scope==='view'){const q=state.search.toLowerCase().trim();rows=rows.filter(r=>r.pos===state.pos&&String(r.season)===String(state.season)&&r.name.toLowerCase().includes(q))}
+else if(o.scope!=='all'){rows=rows.filter(r=>o.pos.has(r.pos)&&o.sea.has(String(r.season)))}
+return rows}
 const XPCOLS=[['rank','Rank',1],['name','Player',1],['pos','Position',1],['season','Season',1],['model','Redraft Score',1],['actual','Actual PPG',1],['pre','Preseason',1],['salary','DFS salary',1],['weekly','Weekly proj.',1],['prop','Prop line',1],['tgtPPG','Next PPG',1],['tgtPre','Next proj.',1],['weeks','GMs',1]];
 const XPHEAD={rank:'rank',name:'name',pos:'pos',season:'season',model:'redraft_score',actual:'actual_ppg',pre:'preseason',salary:'dfs_salary',weekly:'weekly_proj',prop:'prop_line',tgtPPG:'next_ppg_z',tgtPre:'next_proj_z',weeks:'games'};
 function xpRanks(){const g={};for(const r of DATA){(g[r.pos+'|'+r.season]=g[r.pos+'|'+r.season]||[]).push(r)}const m=new Map();
 for(const k in g){const pool=g[k].sort((a,b)=>(b.model??-Infinity)-(a.model??-Infinity)||a.name.localeCompare(b.name));let last=null,rk=0;pool.forEach((r,i)=>{if(r.model!==last){rk=i+1;last=r.model}m.set(r.id,r.model===null?null:rk)})}return m}
 function xpBuild(o){const rk=o.needRank?xpRanks():null;
+if(o.data==='weekly'){let rows=wkFilter(o);
+if(o.sort==='name')rows=[...rows].sort((a,b)=>a.name.localeCompare(b.name)||b.season-a.season||a.week-b.week);
+else rows=[...rows].sort((a,b)=>b.season-a.season||a.week-b.week||a.name.localeCompare(b.name));
+return{head:o.cols.map(k=>WKHEAD[k]),rows:rows.map(r=>o.cols.map(k=>r[k]??''))}}
 let rows;
 if(o.scope==='view'){rows=peers().filter(r=>r.name.toLowerCase().includes(state.search.toLowerCase().trim()));
 const k=state.sort;rows.sort((a,b)=>{if(k==='name'){const c=a.name.localeCompare(b.name);return state.dir==='asc'?c:-c}const av=a[k],bv=b[k];let c;
@@ -167,29 +179,42 @@ else rows=[...rows].sort((a,b)=>a.pos.localeCompare(b.pos)||b.season-a.season||(
 return{head:o.cols.map(k=>XPHEAD[k]),rows:rows.map(r=>o.cols.map(k=>val(r,k)))}}
 function openExport(){hideTip();const back=document.createElement('div');back.className='modal-back';
 const colBoxes=XPCOLS.map(c=>`<label class="xp-opt"><input type="checkbox" data-xpcol="${c[0]}" checked> ${c[1]}</label>`).join('');
+const wkColBoxes=WKCOLS.map(c=>`<label class="xp-opt"><input type="checkbox" data-xpwcol="${c[0]}" checked> ${c[1]}</label>`).join('');
 back.innerHTML=`<div class="modal-card xp-card" role="dialog" aria-modal="true" aria-label="Custom export"><button class="modal-x" aria-label="Close">×</button><h3 style="margin:0 0 2px">Custom export</h3><small style="color:var(--muted)">Copy is tab-separated for pasting into Sheets. Download is a CSV. Scores are positional Z-scores underneath; pick how you want them shown.</small>
-<div class="xp-sec"><span class="filter-label">ROWS</span><label class="xp-opt"><input type="radio" name="xp-scope" value="view" checked> Current view: ${state.pos} ${state.season}${state.search?', matching &quot;'+esc(state.search)+'&quot;':''} (all matching rows, same sort)</label><label class="xp-opt"><input type="radio" name="xp-scope" value="custom"> Custom pick:</label><div class="xp-sub">${['QB','RB','WR','TE'].map(p=>`<label class="xp-opt"><input type="checkbox" data-xppos="${p}" checked> ${p}</label>`).join('')}</div><div class="xp-sub">${SEASONS.map(y=>`<label class="xp-opt"><input type="checkbox" data-xpsea="${y}" checked> ${y}</label>`).join('')}</div><label class="xp-opt"><input type="radio" name="xp-scope" value="all"> Everything: all positions, all seasons</label><label class="xp-opt" style="margin-top:8px"><input type="checkbox" id="xp-complete"> Only players with a Redraft Score</label></div>
-<div class="xp-sec"><span class="filter-label">COLUMNS</span><div class="xp-cols">${colBoxes}</div></div>
-<div class="xp-sec"><span class="filter-label">SCORE FORMAT</span><label class="xp-opt"><input type="radio" name="xp-fmt" value="madden" checked> 50-99 Madden-style, like the site</label><label class="xp-opt"><input type="radio" name="xp-fmt" value="index"> 0-100 index</label><label class="xp-opt"><input type="radio" name="xp-fmt" value="z"> Raw Z-score</label></div>
+<div class="xp-sec"><span class="filter-label">DATA</span><label class="xp-opt"><input type="radio" name="xp-data" value="season" checked> Season totals: one row per player-season</label><label class="xp-opt"><input type="radio" name="xp-data" value="weekly"> Weekly splits: one row per player-week, with a Week column</label></div>
+<div class="xp-sec"><span class="filter-label">ROWS</span><label class="xp-opt"><input type="radio" name="xp-scope" value="view" checked> Current view: ${state.pos} ${state.season}${state.search?', matching &quot;'+esc(state.search)+'&quot;':''} (all matching rows, same sort)</label><label class="xp-opt"><input type="radio" name="xp-scope" value="custom"> Custom pick:</label><div class="xp-sub">${['QB','RB','WR','TE'].map(p=>`<label class="xp-opt"><input type="checkbox" data-xppos="${p}" checked> ${p}</label>`).join('')}</div><div class="xp-sub">${SEASONS.map(y=>`<label class="xp-opt"><input type="checkbox" data-xpsea="${y}" checked> ${y}</label>`).join('')}</div><label class="xp-opt"><input type="radio" name="xp-scope" value="all"> Everything: all positions, all seasons</label><label class="xp-opt" style="margin-top:8px" id="xp-completewrap"><input type="checkbox" id="xp-complete"> Only players with a Redraft Score</label></div>
+<div class="xp-sec"><span class="filter-label">COLUMNS</span><div class="xp-cols" id="xp-cols-season">${colBoxes}</div><div class="xp-cols" id="xp-cols-weekly" style="display:none">${wkColBoxes}</div></div>
+<div class="xp-sec" id="xp-fmtsec"><span class="filter-label">SCORE FORMAT</span><label class="xp-opt"><input type="radio" name="xp-fmt" value="madden" checked> 50-99 Madden-style, like the site</label><label class="xp-opt"><input type="radio" name="xp-fmt" value="index"> 0-100 index</label><label class="xp-opt"><input type="radio" name="xp-fmt" value="z"> Raw Z-score</label></div>
 <div class="xp-sec" id="xp-sortsec"><span class="filter-label">SORT</span><label class="xp-opt"><input type="radio" name="xp-sort" value="score" checked> Redraft Score, best first</label><label class="xp-opt"><input type="radio" name="xp-sort" value="name"> Player A-Z</label></div>
+<div class="xp-sec" id="xp-wsortsec" style="display:none"><span class="filter-label">SORT</span><label class="xp-opt"><input type="radio" name="xp-wsort" value="name" checked> Player A-Z, weeks in order</label><label class="xp-opt"><input type="radio" name="xp-wsort" value="week"> Season and week, then player</label></div>
 <div class="xp-foot"><span id="xp-count"></span><button class="exp-btn" id="xp-copy" type="button">Copy to clipboard</button><button class="exp-btn" id="xp-dl" type="button">Download CSV</button></div></div>`;
 document.body.appendChild(back);
 const close=()=>back.remove();
 back.addEventListener('click',e=>{if(e.target===back||e.target.closest('.modal-x'))close()});
 document.addEventListener('keydown',function escK(e){if(e.key==='Escape'){close();document.removeEventListener('keydown',escK)}});
 const opts=()=>{const scope=back.querySelector('[name=xp-scope]:checked').value;
-return{scope,pos:new Set([...back.querySelectorAll('[data-xppos]:checked')].map(x=>x.dataset.xppos)),sea:new Set([...back.querySelectorAll('[data-xpsea]:checked')].map(x=>x.dataset.xpsea)),complete:back.querySelector('#xp-complete').checked,cols:[...back.querySelectorAll('[data-xpcol]:checked')].map(x=>x.dataset.xpcol),format:back.querySelector('[name=xp-fmt]:checked').value,sort:back.querySelector('[name=xp-sort]:checked').value,needRank:true}};
-const refresh=()=>{const o=opts();back.querySelector('#xp-sortsec').style.display=o.scope==='view'?'none':'';
-const n=o.scope==='view'?peers().filter(r=>r.name.toLowerCase().includes(state.search.toLowerCase().trim())).length:o.scope==='all'?DATA.length:DATA.filter(r=>o.pos.has(r.pos)&&o.sea.has(String(r.season))).length;
-back.querySelector('#xp-count').textContent=o.cols.length?`${n} rows x ${o.cols.length} columns`:'Pick at least one column';
-back.querySelector('#xp-copy').disabled=!o.cols.length;back.querySelector('#xp-dl').disabled=!o.cols.length};
-back.addEventListener('change',refresh);refresh();
+const data=back.querySelector('[name=xp-data]:checked').value;
+return{scope,data,pos:new Set([...back.querySelectorAll('[data-xppos]:checked')].map(x=>x.dataset.xppos)),sea:new Set([...back.querySelectorAll('[data-xpsea]:checked')].map(x=>x.dataset.xpsea)),complete:back.querySelector('#xp-complete').checked,cols:[...back.querySelectorAll(data==='weekly'?'[data-xpwcol]:checked':'[data-xpcol]:checked')].map(x=>x.dataset.xpcol||x.dataset.xpwcol),format:back.querySelector('[name=xp-fmt]:checked').value,sort:data==='weekly'?back.querySelector('[name=xp-wsort]:checked').value:back.querySelector('[name=xp-sort]:checked').value,needRank:true}};
+const refresh=()=>{const o=opts();const wk=o.data==='weekly';
+back.querySelector('#xp-cols-season').style.display=wk?'none':'';
+back.querySelector('#xp-cols-weekly').style.display=wk?'':'none';
+back.querySelector('#xp-sortsec').style.display=(!wk&&o.scope!=='view')?'':'none';
+back.querySelector('#xp-wsortsec').style.display=wk?'':'none';
+back.querySelector('#xp-fmtsec').style.display=wk?'none':'';
+back.querySelector('#xp-completewrap').style.display=wk?'none':'';
+let n,ok=o.cols.length>0;
+if(wk){n=WK?wkFilter(o).length:0;ok=ok&&!!WK;
+back.querySelector('#xp-count').textContent=WK?(o.cols.length?`${n} rows x ${o.cols.length} columns`:'Pick at least one column'):'Loading weekly data...'}
+else{n=o.scope==='view'?peers().filter(r=>r.name.toLowerCase().includes(state.search.toLowerCase().trim())).length:o.scope==='all'?DATA.length:DATA.filter(r=>o.pos.has(r.pos)&&o.sea.has(String(r.season))).length;
+back.querySelector('#xp-count').textContent=o.cols.length?`${n} rows x ${o.cols.length} columns`:'Pick at least one column'}
+back.querySelector('#xp-copy').disabled=!ok;back.querySelector('#xp-dl').disabled=!ok};
+back.addEventListener('change',refresh);refresh();fetchWeeklyRows().then(r=>{WK=r;refresh()});
 back.querySelector('#xp-copy').addEventListener('click',e=>{const b=xpBuild(opts());copyText([b.head.join('\t'),...b.rows.map(r=>r.join('\t'))].join('\n'),e.target.closest('button'))});
 back.querySelector('#xp-dl').addEventListener('click',e=>{const b=xpBuild(opts());
 const q=v=>{const t=String(v);return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t};
 const csv=[b.head.join(','),...b.rows.map(r=>r.map(q).join(','))].join('\n');
 const blob=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);
-const o=opts();a.download='redraft-export-'+(o.scope==='view'?state.pos.toLowerCase()+'-'+state.season:o.scope)+'.csv';
+const o=opts();a.download='redraft-export-'+(o.data==='weekly'?'weekly-':'')+(o.scope==='view'?state.pos.toLowerCase()+'-'+state.season:o.scope)+'.csv';
 document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000)})}
 $('#custom-export').addEventListener('click',openExport);function setTips(){const y=state.season,sc=`shown on a Madden-style 50-99 scale against others at their position in ${y}`,t={'actual':`PPR fantasy points per game, ${sc}. Counts once a player has at least 4 games; under 4, the other weights rescale to fill in. 50% of the Redraft Score.`,'pre':`Total consensus preseason PPR fantasy points projection for ${y}, ${sc}. 25% of the Redraft Score.`,'salary':`Consensus average weekly DFS salary, ${sc}. 15% of the Redraft Score.`,'weekly':`${y} average weekly consensus PPR projection, ${sc}. 5% of the Redraft Score.`,'prop':`Average weekly projection derived from Vegas prop lines, ${sc}. 5% of the Redraft Score.`,'tgtppg':y===2026?`PPR fantasy points per game in the following season (2027), as a positional Z-score against the other players at their position. Blank everywhere for now - the 2027 season has not happened yet. Check a past season to see it.`:`PPR fantasy points per game in ${y+1}, the season after the one shown, as a positional Z-score against the other ${y} players at their position.`,'tgtpre':y===2026?`Total consensus preseason PPR fantasy points projection for the following season (2027), as a positional Z-score against the other players at their position. Blank everywhere for now - there is no 2027 preseason projection yet. Check a past season to see it.`:`Total consensus preseason PPR fantasy points projection for ${y+1}, as a positional Z-score against the other ${y} players at their position.`};for(const k in t){const el=document.getElementById('tip-'+k);if(el)el.dataset.tip=t[k]}}setTips();render();
 function openFromHash(){const m=/^#player=(.+)$/.exec(location.hash||'');if(!m)return;const id=decodeURIComponent(m[1]);const r=DATA.find(x=>x.id===id);if(!r)return;state.pos=r.pos;state.season=r.season;state.selected=id;state.search='';render();openWeekly(id)}
