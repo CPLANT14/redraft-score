@@ -152,30 +152,30 @@ addEventListener('scroll',()=>hideTip(),{capture:true,passive:true});const _thea
 $('main').addEventListener('click',e=>{const th=e.target.closest('[data-tip]');if(!th){hideTip();return}if(matchMedia('(hover:none)').matches){const isSort=!!e.target.closest('[data-sort]');if(th.hasAttribute('data-tip-open')){hideTip()}else{showTip(th)}if(!isSort){e.preventDefault();e.stopPropagation()}}},true);
 $('#reset').addEventListener('click',()=>{state.search='';$('#search').value='';render()});$('#rows').addEventListener('change',()=>{state.limit=rowsVal();render()});const rowsVal=()=>{const v=document.getElementById('rows').value;return v==='all'?1e9:+v};function copyText(t,btn){const done=()=>{if(!btn)return;const o=btn.textContent;btn.textContent='Copied';setTimeout(()=>{btn.textContent=o},1500)};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done,done)}else{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy')}catch(_){}ta.remove();done()}}
 
-const WKCOLS=[['name','Player'],['pos','Position'],['season','Season'],['week','Week'],['pts','Fantasy points'],['proj','Weekly proj.'],['sproj','Season proj.'],['sal','DFS salary'],['prop','Prop line'],['cap','Salary cap %'],['slate','Main slate'],['done','Week completed']];
-const WKHEAD={name:'name',pos:'pos',season:'season',week:'week',pts:'fantasy_points',proj:'weekly_projection',sproj:'season_projection',sal:'dfs_salary',prop:'implied_prop_pts',cap:'salary_cap_pct',slate:'main_slate',done:'week_completed'};
+const WKCOLS=[['name','Player'],['pos','Position'],['season','Season'],['week','Week'],['age','Age'],['pts','Fantasy points'],['proj','Weekly proj.'],['sproj','Season proj.'],['sal','DFS salary'],['prop','Prop line'],['cap','Salary cap %'],['slate','Main slate'],['done','Week completed']];
+const WKHEAD={name:'name',pos:'pos',season:'season',week:'week',age:'age',pts:'fantasy_points',proj:'weekly_projection',sproj:'season_projection',sal:'dfs_salary',prop:'implied_prop_pts',cap:'salary_cap_pct',slate:'main_slate',done:'week_completed'};
 let WK=null,_wkRowsP=null;
 function fetchWeeklyRows(){if(!_wkRowsP){_wkRowsP=fetch('weekly.csv').then(r=>{if(!r.ok)throw new Error('http');return r.text()}).then(t=>{const out=[];const ls=t.split(/\r?\n/);for(let i=1;i<ls.length;i++){const ln=ls[i];if(!ln)continue;const c=parseCsvLine(ln);if(c.length<12)continue;out.push({id:c[0],name:c[1],pos:c[2],season:c[3],week:+c[4],pts:c[5],proj:c[6],sproj:c[7],sal:c[8],prop:c[9],slate:c[10],done:c[11],cap:c[13]===undefined?'':c[13]})}return out}).catch(()=>[])}return _wkRowsP}
 function wkFilter(o){let rows=WK||[];
 if(o.scope==='view'){const q=state.search.toLowerCase().trim();rows=rows.filter(r=>r.pos===state.pos&&String(r.season)===String(state.season)&&r.name.toLowerCase().includes(q))}
 else if(o.scope!=='all'){rows=rows.filter(r=>o.pos.has(r.pos)&&o.sea.has(String(r.season)))}
 return rows}
-const XPCOLS=[['rank','Rank',1],['name','Player',1],['pos','Position',1],['season','Season',1],['model','Redraft Score',1],['actual','Actual PPG',1],['pre','Preseason',1],['salary','DFS salary',1],['weekly','Weekly proj.',1],['prop','Prop line',1],['tgtPPG','Next PPG',1],['tgtPre','Next proj.',1],['weeks','GMs',1]];
-const XPHEAD={rank:'rank',name:'name',pos:'pos',season:'season',model:'redraft_score',actual:'actual_ppg',pre:'preseason',salary:'dfs_salary',weekly:'weekly_proj',prop:'prop_line',tgtPPG:'next_ppg_z',tgtPre:'next_proj_z',weeks:'games'};
+const XPCOLS=[['rank','Rank',1],['name','Player',1],['pos','Position',1],['season','Season',1],['age','Age',1],['model','Redraft Score',1],['actual','Actual PPG',1],['pre','Preseason',1],['salary','DFS salary',1],['weekly','Weekly proj.',1],['prop','Prop line',1],['tgtPPG','Next PPG',1],['tgtPre','Next proj.',1],['weeks','GMs',1]];
+const XPHEAD={rank:'rank',name:'name',pos:'pos',season:'season',age:'age',model:'redraft_score',actual:'actual_ppg',pre:'preseason',salary:'dfs_salary',weekly:'weekly_proj',prop:'prop_line',tgtPPG:'next_ppg_z',tgtPre:'next_proj_z',weeks:'games'};
 function xpRanks(){const g={};for(const r of DATA){(g[r.pos+'|'+r.season]=g[r.pos+'|'+r.season]||[]).push(r)}const m=new Map();
 for(const k in g){const pool=g[k].sort((a,b)=>(b.model??-Infinity)-(a.model??-Infinity)||a.name.localeCompare(b.name));let last=null,rk=0;pool.forEach((r,i)=>{if(r.model!==last){rk=i+1;last=r.model}m.set(r.id,r.model===null?null:rk)})}return m}
 function xpBuild(o){const rk=o.needRank?xpRanks():null;
 if(o.data==='weekly'){let rows=wkFilter(o);
 if(o.sort==='name')rows=[...rows].sort((a,b)=>a.name.localeCompare(b.name)||b.season-a.season||a.week-b.week);
 else rows=[...rows].sort((a,b)=>b.season-a.season||a.week-b.week||a.name.localeCompare(b.name));
-return{head:o.cols.map(k=>WKHEAD[k]),rows:rows.map(r=>o.cols.map(k=>r[k]??''))}}
+return{head:o.cols.map(k=>WKHEAD[k]),rows:rows.map(r=>o.cols.map(k=>k==='age'?AGES[r.id]??'':r[k]??''))}}
 let rows;
 if(o.scope==='view'){rows=peers().filter(r=>r.name.toLowerCase().includes(state.search.toLowerCase().trim()));
 const k=state.sort;rows.sort((a,b)=>{if(k==='name'){const c=a.name.localeCompare(b.name);return state.dir==='asc'?c:-c}const av=a[k],bv=b[k];let c;
 if(av==null&&bv==null)c=0;else if(av==null)c=1;else if(bv==null)c=-1;else c=state.dir==='asc'?av-bv:bv-av;return c||a.name.localeCompare(b.name)})}else{rows=DATA.filter(r=>o.scope==='all'||(o.pos.has(r.pos)&&o.sea.has(String(r.season))))}if(o.complete)rows=rows.filter(r=>Number.isFinite(r.model));
 const fmtV=v=>{if(!Number.isFinite(v))return'';return o.format==='z'?v.toFixed(3):o.format==='index'?fmtRaw(v):fmt(v)};
 if(o.scope!=='view'){if(o.sort==='name')rows=[...rows].sort((a,b)=>a.name.localeCompare(b.name)||a.pos.localeCompare(b.pos)||b.season-a.season);
-else rows=[...rows].sort((a,b)=>a.pos.localeCompare(b.pos)||b.season-a.season||(b.model??-Infinity)-(a.model??-Infinity)||a.name.localeCompare(b.name))}const val=(r,k)=>{if(k==='rank')return rk?rk.get(r.id)??'':'';if(k==='name')return r.name;if(k==='pos')return r.pos;if(k==='season')return r.season;if(k==='weeks')return r.weeks??'';return fmtV(r[k])};
+else rows=[...rows].sort((a,b)=>a.pos.localeCompare(b.pos)||b.season-a.season||(b.model??-Infinity)-(a.model??-Infinity)||a.name.localeCompare(b.name))}const val=(r,k)=>{if(k==='rank')return rk?rk.get(r.id)??'':'';if(k==='name')return r.name;if(k==='pos')return r.pos;if(k==='season')return r.season;if(k==='age')return AGES[r.player]??'';if(k==='weeks')return r.weeks??'';return fmtV(r[k])};
 return{head:o.cols.map(k=>XPHEAD[k]),rows:rows.map(r=>o.cols.map(k=>val(r,k)))}}
 function openExport(){hideTip();const back=document.createElement('div');back.className='modal-back';
 const colBoxes=XPCOLS.map(c=>`<label class="xp-opt"><input type="checkbox" data-xpcol="${c[0]}" checked> ${c[1]}</label>`).join('');
