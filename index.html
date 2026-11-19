@@ -156,6 +156,10 @@ const WKCOLS=[['name','Player'],['pos','Position'],['season','Season'],['week','
 const WKHEAD={name:'name',pos:'pos',season:'season',week:'week',age:'age',pts:'fantasy_points',proj:'weekly_projection',sproj:'season_projection',sal:'dfs_salary',prop:'implied_prop_pts',cap:'salary_cap_pct',slate:'main_slate',done:'week_completed'};
 let WK=null,_wkRowsP=null;
 function fetchWeeklyRows(){if(!_wkRowsP){_wkRowsP=fetch('weekly.csv').then(r=>{if(!r.ok)throw new Error('http');return r.text()}).then(t=>{const out=[];const ls=t.split(/\r?\n/);for(let i=1;i<ls.length;i++){const ln=ls[i];if(!ln)continue;const c=parseCsvLine(ln);if(c.length<12)continue;out.push({id:c[0],name:c[1],pos:c[2],season:c[3],week:+c[4],pts:c[5],proj:c[6],sproj:c[7],sal:c[8],prop:c[9],slate:c[10],done:c[11],cap:c[13]===undefined?'':c[13]})}return out}).catch(()=>[])}return _wkRowsP}
+let SLP=null,_slpP=null;
+function sleeperAges(){if(!_slpP){_slpP=fetch('https://api.sleeper.app/v1/players/nfl').then(r=>{if(!r.ok)throw new Error('http');return r.json()}).then(d=>{const m={};for(const k in d){const p=d[k];if(p&&p.birth_date)m[k]=p.birth_date}return m}).catch(()=>({__err:1}))}return _slpP}
+function ageAtSeason(bd,season){if(!bd)return'';const p=String(bd).split('-');const by=+p[0],bm=+p[1],bd2=+p[2];if(!by||!season)return'';let a=season-by;if(bm>9||(bm===9&&bd2>1))a--;return a}
+function trueAge(pid,season){if(!SLP)return'';const hid=HEADSHOTS[pid];if(!hid)return'';return ageAtSeason(SLP[hid],+season)}
 function wkFilter(o){let rows=WK||[];
 if(o.scope==='view'){const q=state.search.toLowerCase().trim();rows=rows.filter(r=>r.pos===state.pos&&String(r.season)===String(state.season)&&r.name.toLowerCase().includes(q))}
 else if(o.scope!=='all'){rows=rows.filter(r=>o.pos.has(r.pos)&&o.sea.has(String(r.season)))}
@@ -168,14 +172,14 @@ function xpBuild(o){const rk=o.needRank?xpRanks():null;
 if(o.data==='weekly'){let rows=wkFilter(o);
 if(o.sort==='name')rows=[...rows].sort((a,b)=>a.name.localeCompare(b.name)||b.season-a.season||a.week-b.week);
 else rows=[...rows].sort((a,b)=>b.season-a.season||a.week-b.week||a.name.localeCompare(b.name));
-return{head:o.cols.map(k=>WKHEAD[k]),rows:rows.map(r=>o.cols.map(k=>k==='age'?AGES[r.id]??'':r[k]??''))}}
+return{head:o.cols.map(k=>WKHEAD[k]),rows:rows.map(r=>o.cols.map(k=>k==='age'?trueAge(r.id,+r.season):r[k]??''))}}
 let rows;
 if(o.scope==='view'){rows=peers().filter(r=>r.name.toLowerCase().includes(state.search.toLowerCase().trim()));
 const k=state.sort;rows.sort((a,b)=>{if(k==='name'){const c=a.name.localeCompare(b.name);return state.dir==='asc'?c:-c}const av=a[k],bv=b[k];let c;
 if(av==null&&bv==null)c=0;else if(av==null)c=1;else if(bv==null)c=-1;else c=state.dir==='asc'?av-bv:bv-av;return c||a.name.localeCompare(b.name)})}else{rows=DATA.filter(r=>o.scope==='all'||(o.pos.has(r.pos)&&o.sea.has(String(r.season))))}if(o.complete)rows=rows.filter(r=>Number.isFinite(r.model));
 const fmtV=v=>{if(!Number.isFinite(v))return'';return o.format==='z'?v.toFixed(3):o.format==='index'?fmtRaw(v):fmt(v)};
 if(o.scope!=='view'){if(o.sort==='name')rows=[...rows].sort((a,b)=>a.name.localeCompare(b.name)||a.pos.localeCompare(b.pos)||b.season-a.season);
-else rows=[...rows].sort((a,b)=>a.pos.localeCompare(b.pos)||b.season-a.season||(b.model??-Infinity)-(a.model??-Infinity)||a.name.localeCompare(b.name))}const val=(r,k)=>{if(k==='rank')return rk?rk.get(r.id)??'':'';if(k==='name')return r.name;if(k==='pos')return r.pos;if(k==='season')return r.season;if(k==='age')return AGES[r.player]??'';if(k==='weeks')return r.weeks??'';return fmtV(r[k])};
+else rows=[...rows].sort((a,b)=>a.pos.localeCompare(b.pos)||b.season-a.season||(b.model??-Infinity)-(a.model??-Infinity)||a.name.localeCompare(b.name))}const val=(r,k)=>{if(k==='rank')return rk?rk.get(r.id)??'':'';if(k==='name')return r.name;if(k==='pos')return r.pos;if(k==='season')return r.season;if(k==='age')return trueAge(r.player,r.season);if(k==='weeks')return r.weeks??'';return fmtV(r[k])};
 return{head:o.cols.map(k=>XPHEAD[k]),rows:rows.map(r=>o.cols.map(k=>val(r,k)))}}
 function openExport(){hideTip();const back=document.createElement('div');back.className='modal-back';
 const colBoxes=XPCOLS.map(c=>`<label class="xp-opt"><input type="checkbox" data-xpcol="${c[0]}" checked> ${c[1]}</label>`).join('');
@@ -207,8 +211,8 @@ if(wk){n=WK?wkFilter(o).length:0;ok=ok&&!!WK;
 back.querySelector('#xp-count').textContent=WK?(o.cols.length?`${n} rows x ${o.cols.length} columns`:'Pick at least one column'):'Loading weekly data...'}
 else{n=o.scope==='view'?peers().filter(r=>r.name.toLowerCase().includes(state.search.toLowerCase().trim())).length:o.scope==='all'?DATA.length:DATA.filter(r=>o.pos.has(r.pos)&&o.sea.has(String(r.season))).length;
 back.querySelector('#xp-count').textContent=o.cols.length?`${n} rows x ${o.cols.length} columns`:'Pick at least one column'}
-back.querySelector('#xp-copy').disabled=!ok;back.querySelector('#xp-dl').disabled=!ok};
-back.addEventListener('change',refresh);refresh();fetchWeeklyRows().then(r=>{WK=r;refresh()});
+if(o.cols.includes('age')&&!SLP){ok=false;back.querySelector('#xp-count').textContent+=' (loading ages...)'}back.querySelector('#xp-copy').disabled=!ok;back.querySelector('#xp-dl').disabled=!ok};
+back.addEventListener('change',refresh);refresh();fetchWeeklyRows().then(r=>{WK=r;refresh()});sleeperAges().then(m=>{SLP=m.__err?{}:m;refresh()});
 back.querySelector('#xp-copy').addEventListener('click',e=>{const b=xpBuild(opts());copyText([b.head.join('\t'),...b.rows.map(r=>r.join('\t'))].join('\n'),e.target.closest('button'))});
 back.querySelector('#xp-dl').addEventListener('click',e=>{const b=xpBuild(opts());
 const q=v=>{const t=String(v);return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t};
